@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<title>君の名は。舞台巡りルート</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+  #map { height: 80vh; }
+</style>
+</head>
+<body>
+
+<h2>「君の名は。」舞台巡りルート</h2>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+const spots = [
+      { name: "「君の名は。」 気多若宮神社", lat: 36.239437, lng: 137.197881 ,category: "君の名は。", prefecture: "岐阜県"},
+      { name: "「君の名は。」 飛騨市図書館", lat: 36.238024, lng: 137.185309 ,category: "君の名は。", prefecture: "岐阜県"},
+      { name: "「君の名は。」 落合バス停", lat: 36.302297537115315,  lng: 137.11009418156635 ,category: "君の名は。", prefecture: "岐阜県"},
+      { name: "「君の名は。」 名古屋駅", lat:35.17089325714845, lng:  136.88146805573254 ,category: "君の名は。", prefecture: "愛知県"},
+      { name: "「君の名は。」 飛騨古川駅", lat: 36.23673022684053,lng: 137.18962962208883  ,category: "君の名は。", prefecture: "岐阜県"},
+      { name: "「君の名は。」 飛騨山王宮日枝神社", lat:36.13317456855519,  lng: 137.2613827341292,category: "君の名は。", prefecture: "愛知県"}
+];
+
+const map = L.map('map').setView([35, 137], 7);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+let userMarker;
+let routeLine;
+
+function calculateDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI /180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// 貪欲法で順番決め
+function getRouteOrder(startLat, startLng, spots) {
+  const remaining = spots.slice();
+  const order = [];
+  let currentLat = startLat;
+  let currentLng = startLng;
+
+  while (remaining.length > 0) {
+    let nearestIndex = 0;
+    let nearestDist = calculateDistance(currentLat, currentLng, remaining[0].lat, remaining[0].lng);
+    for(let i=1; i<remaining.length; i++) {
+      const dist = calculateDistance(currentLat, currentLng, remaining[i].lat, remaining[i].lng);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestIndex = i;
+      }
+    }
+    const nextSpot = remaining.splice(nearestIndex, 1)[0];
+    order.push(nextSpot);
+    currentLat = nextSpot.lat;
+    currentLng = nextSpot.lng;
+  }
+  return order;
+}
+
+function drawRoute(coords) {
+  if (routeLine) map.removeLayer(routeLine);
+  routeLine = L.polyline(coords, {color: 'blue', weight: 5}).addTo(map);
+  map.fitBounds(routeLine.getBounds());
+}
+
+function fetchRoute(waypoints) {
+  // waypointsは [{lat,lng}, ...] の配列
+  const coords = waypoints.map(p => [p.lng, p.lat]);
+
+  fetch('https://api.openrouteservice.org/v2/directions/foot-walking/geojson', {
+    method: 'POST',
+    headers: {
+      'Authorization': '5b3ce3597851110001cf62487338421d75c3437b97c6fe3ace881105',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({coordinates: coords})
+  })
+  .then(res => {
+    if(!res.ok) throw new Error('APIエラー: ' + res.status);
+    return res.json();
+  })
+  .then(data => {
+    const geojson = data.features[0].geometry;
+    const latlngs = geojson.coordinates.map(c => [c[1], c[0]]);
+    drawRoute(latlngs);
+  })
+  .catch(err => {
+    alert('ルート取得エラー: ' + err.message);
+    console.error(err);
+  });
+}
+
+function init() {
+  if (!navigator.geolocation) {
+    alert('現在地が取得できません');
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(pos => {
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    userMarker = L.marker([lat, lng]).addTo(map).bindPopup('現在地').openPopup();
+
+    // 現在地から巡る順番決め
+    const orderedSpots = getRouteOrder(lat, lng, spots);
+
+    // マーカー設置
+    orderedSpots.forEach(s => {
+      L.marker([s.lat, s.lng]).addTo(map).bindPopup(s.name);
+    });
+
+    // ルート取得・描画
+    const routePoints = [{lat, lng}, ...orderedSpots];
+    fetchRoute(routePoints);
+  }, () => alert('現在地の取得に失敗しました'));
+}
+
+init();
+</script>
+</body>
+</html>
